@@ -1,13 +1,15 @@
 # MacGrabber
 
-Splatoon v288 Cemu PID Grabber for MacOS 
+Splatoon v288 Cemu PID Grabber for MacOS.
+Download latest release [here](https://github.com/CrafterPika/MacGrabber/releases/latest).
 
 ![image](demo.png)
 
 # Output
 
-Tool will prove following output:
+Tool will provide following output:
 - Player Number
+- Player Name
 - PID (hex & dec format)
 - PNID (Fetched from Pretendo's API)
 - Session ID (hex & dec format)

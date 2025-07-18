@@ -68,6 +68,10 @@ public class MacGrabber {
         return buffer;
     }
 
+    static uint readUInt32(int pid, ulong address) {
+        return BitConverter.ToUInt32(ReadProcessMemory(pid, address, 4).Reverse().ToArray(), 0);
+    }
+
     static async Task<string> GetPNID(int pid) {
         using (HttpClient client = new HttpClient()) {
             client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0");
@@ -149,9 +153,9 @@ public class MacGrabber {
         Console.WriteLine("Player X: PID (Hex)| PID (Dec)  | PNID             | Name");
         Console.WriteLine("---------------------------------------------------------");
         for (var i = 0; i < 8; i++) {
-            var p = BitConverter.ToUInt32(ReadProcessMemory(pid, cbase2 + 0x101DD330, 4).Reverse().ToArray());
-            var p1 = BitConverter.ToUInt32(ReadProcessMemory(pid, cbase2 + (uint)(p + 0x10), 4).Reverse().ToArray());
-            var p2 = BitConverter.ToUInt32(ReadProcessMemory(pid, cbase2 + (uint)(p1 + i * 4), 4).Reverse().ToArray());
+            var p = readUInt32(pid, cbase2 + 0x101DD330);
+            var p1 = readUInt32(pid, cbase2 + (uint)(p + 0x10));
+            var p2 = readUInt32(pid, cbase2 + (uint)(p1 + i * 4));
             var p3 = ReadProcessMemory(pid, cbase2 + (uint)(p2 + 0xd0), 4).Reverse().ToArray(); // PID
 
             // get name
@@ -160,18 +164,17 @@ public class MacGrabber {
             name = name.Replace("\n", "").Replace("\r", "");
 
             string nnidHex = BitConverter.ToString(p3).Replace("-", "");
-            string nnidDec = BitConverter.ToInt32(p3, 0).ToString().PadRight(10, ' ');
-            string nnidStr = GetPNID(Int32.Parse(nnidDec)).GetAwaiter().GetResult();
-            nnidStr = nnidStr.PadRight(16, ' ');
+            string nnidDec = BitConverter.ToUInt32(p3, 0).ToString().PadRight(10, ' ');
+            string nnidStr = GetPNID(Int32.Parse(nnidDec)).GetAwaiter().GetResult().PadRight(16, ' ');
             Console.WriteLine($"Player {i}: {nnidHex} | {nnidDec} | {nnidStr} | {name}");
 
         }
 
         // Session ID Grab
-        var id_ptr = BitConverter.ToUInt32(ReadProcessMemory(pid, cbase2 + 0x101E8980, 4).Reverse().ToArray());
+        var id_ptr = readUInt32(pid, cbase2 + 0x101E8980);
         if (id_ptr != 0) {
             var index = ReadProcessMemory(pid, cbase2 + (uint)(id_ptr + 0xBD), 1)[0];
-            var sessionID = BitConverter.ToUInt32(ReadProcessMemory(pid, cbase2 + (uint)(id_ptr + index + 0xCC), 4).Reverse().ToArray());
+            var sessionID = readUInt32(pid, cbase2 + (uint)(id_ptr + index + 0xCC));
             Console.WriteLine($"\nSession ID: {sessionID:X8} (Dec: {sessionID})"); 
         } else {
             Console.WriteLine($"\nSession ID: None");

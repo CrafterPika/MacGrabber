@@ -16,8 +16,11 @@ using System.Threading.Tasks;
 using System.Xml.Linq;
 
 public class MacGrabber {
+    // vars
     const int KERN_SUCCESS = 0;
     const string LIBSYSTEM = "/usr/lib/libSystem.B.dylib";
+    static ulong cbase = 0;
+    static int pid = 0;
 
     // https://github.com/attilathedud/macos_task_for_pid#overview
     // Well documenated apis, thanks Apple.
@@ -68,8 +71,12 @@ public class MacGrabber {
         return buffer;
     }
 
-    static uint readUInt32(int pid, ulong address) {
-        return BitConverter.ToUInt32(ReadProcessMemory(pid, address, 4).Reverse().ToArray(), 0);
+    static byte[] readBytes(uint address, uint length) {
+        return ReadProcessMemory(pid, cbase + address, length);
+    }
+
+    static uint readUInt32(uint address) {
+        return BitConverter.ToUInt32(ReadProcessMemory(pid, cbase + address, 4).Reverse().ToArray(), 0);
     }
 
     static async Task<string> GetPNID(int pid) {
@@ -102,7 +109,6 @@ public class MacGrabber {
         Console.OutputEncoding = System.Text.Encoding.UTF8;
 
         // get the cemu process
-        int pid;
         string[] processNames = {"cemu", "cemu_release"};
         Process targetProcess = Process.GetProcesses()
             .FirstOrDefault(p => processNames.Contains(p.ProcessName.ToLower()));
@@ -127,7 +133,7 @@ public class MacGrabber {
         // Find Cemu's base address
         string cemu_log = $"/Users/{username}/Library/Application Support/Cemu/log.txt";
         string pattern = @"base:\s*(0x[0-9A-Fa-f]+)";
-        string cbase = null;
+        string patternMatch = null;
 
         if (!File.Exists(cemu_log)) {
             Console.WriteLine("Could not find cemu log.txt in: " + cemu_log);
@@ -136,45 +142,39 @@ public class MacGrabber {
         foreach (string line in File.ReadLines(cemu_log)) {
             Match match = Regex.Match(line, pattern);
             if (match.Success) {
-                cbase = match.Groups[1].Value;
+                patternMatch = match.Groups[1].Value;
                 break;
             }
         }
-        if (cbase == "0") {
+        if (patternMatch == null) {
             Console.WriteLine("Could not find cemu base address.");
             return;
         }
-        ulong cbase2 = Convert.ToUInt64(cbase, 16);
+        cbase = Convert.ToUInt64(patternMatch, 16);
 
         Console.WriteLine("MacGrabber by CrafterPika.");
         Console.WriteLine("Special Thanks: Javi, Tombuntu and Winterberry.\n");
-        Console.WriteLine($"Found Cemu base: {cbase}");
+        Console.WriteLine($"Found Cemu base: {patternMatch}");
         // Alr now it's getting intresting
         Console.WriteLine("Player X: PID (Hex)| PID (Dec)  | PNID             | Name");
         Console.WriteLine("---------------------------------------------------------");
         for (var i = 0; i < 8; i++) {
-            var p = readUInt32(pid, cbase2 + 0x101DD330);
-            var p1 = readUInt32(pid, cbase2 + (uint)(p + 0x10));
-            var p2 = readUInt32(pid, cbase2 + (uint)(p1 + i * 4));
-            var p3 = ReadProcessMemory(pid, cbase2 + (uint)(p2 + 0xd0), 4).Reverse().ToArray(); // PID
+            var p = readUInt32((uint)(readUInt32((uint)(readUInt32(0x101DD330) + 0x10)) + i * 4)); //PlayerInfo Pointer
+            var p2 = readBytes((uint)(p + 0xd0), 4).Reverse().ToArray(); // PID
+            string name = Encoding.BigEndianUnicode.GetString(readBytes((uint)(p + 0x6), 32)).Replace("\n", "").Replace("\r", ""); // Player Name
 
-            // get name
-            var nameBytes = ReadProcessMemory(pid, cbase2 + (uint)(p2 + 0x6), 32);
-            var name = Encoding.BigEndianUnicode.GetString(nameBytes);
-            name = name.Replace("\n", "").Replace("\r", "");
-
-            string nnidHex = BitConverter.ToString(p3).Replace("-", "");
-            string nnidDec = BitConverter.ToUInt32(p3, 0).ToString().PadRight(10, ' ');
+            string nnidHex = BitConverter.ToString(p2).Replace("-", "");
+            string nnidDec = BitConverter.ToUInt32(p2, 0).ToString().PadRight(10, ' ');
             string nnidStr = GetPNID(Int32.Parse(nnidDec)).GetAwaiter().GetResult().PadRight(16, ' ');
             Console.WriteLine($"Player {i}: {nnidHex} | {nnidDec} | {nnidStr} | {name}");
 
         }
 
         // Session ID Grab
-        var id_ptr = readUInt32(pid, cbase2 + 0x101E8980);
+        var id_ptr = readUInt32(0x101E8980);
         if (id_ptr != 0) {
-            var index = ReadProcessMemory(pid, cbase2 + (uint)(id_ptr + 0xBD), 1)[0];
-            var sessionID = readUInt32(pid, cbase2 + (uint)(id_ptr + index + 0xCC));
+            var index = readBytes((uint)(id_ptr + 0xBD), 1)[0];
+            var sessionID = readUInt32((uint)(id_ptr + index + 0xCC));
             Console.WriteLine($"\nSession ID: {sessionID:X8} (Dec: {sessionID})"); 
         } else {
             Console.WriteLine($"\nSession ID: None");

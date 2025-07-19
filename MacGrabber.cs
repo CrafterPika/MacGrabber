@@ -167,7 +167,6 @@ public class MacGrabber {
             string nnidDec = BitConverter.ToUInt32(p2, 0).ToString().PadRight(10, ' ');
             string nnidStr = GetPNID(Int32.Parse(nnidDec)).GetAwaiter().GetResult().PadRight(16, ' ');
             Console.WriteLine($"Player {i}: {nnidHex} | {nnidDec} | {nnidStr} | {name}");
-
         }
 
         // Session ID Grab

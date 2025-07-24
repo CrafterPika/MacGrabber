@@ -26,7 +26,7 @@ public class MacGrabber {
     static int pid = 0;
 
     [StructLayout(LayoutKind.Sequential)]
-   struct vm_region_basic_info_64 {
+    struct vm_region_basic_info_64 {
         public int protection;
         public int max_protection;
         public int inheritance;

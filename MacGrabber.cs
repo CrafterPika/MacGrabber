@@ -26,7 +26,7 @@ public class MacGrabber {
     static int pid = 0;
 
     [StructLayout(LayoutKind.Sequential)]
-    public struct vm_region_basic_info_64 {
+   struct vm_region_basic_info_64 {
         public int protection;
         public int max_protection;
         public int inheritance;
@@ -61,7 +61,7 @@ public class MacGrabber {
         ulong size);
         
     [DllImport(LIBSYSTEM)]
-    public static extern int mach_vm_region(IntPtr task,
+    static extern int mach_vm_region(IntPtr task,
         ref ulong address,
         out ulong size,
         int flavor,
@@ -97,7 +97,7 @@ public class MacGrabber {
         return buffer;
     }
     
-    public static ulong FindCemuBase(int pid, ulong minSize) {
+    static ulong FindCemuBase(int pid, ulong minSize) {
         IntPtr task;
         IntPtr localTask = mach_task_self();
         byte?[] patternBytes = new byte?[] { 0x02, 0xD4, 0xE7 };

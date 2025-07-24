@@ -19,8 +19,24 @@ public class MacGrabber {
     // vars
     const int KERN_SUCCESS = 0;
     const string LIBSYSTEM = "/usr/lib/libSystem.B.dylib";
+    const int VM_REGION_BASIC_INFO_64 = 9;
+    const int VM_REGION_BASIC_INFO_COUNT_64 = 10;
+    const int VM_PROT_READ = 0x01;
     static ulong cbase = 0;
     static int pid = 0;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct vm_region_basic_info_64 {
+        public int protection;
+        public int max_protection;
+        public int inheritance;
+        public int shared;
+        public int reserved;
+        public ulong offset;
+        public int behavior;
+        public short user_wired_count;
+        public short user_tag;
+    }
 
     // https://github.com/attilathedud/macos_task_for_pid#overview
     // Well documenated apis, thanks Apple.
@@ -43,6 +59,16 @@ public class MacGrabber {
     static extern int vm_deallocate(IntPtr task,
         IntPtr address,
         ulong size);
+        
+    [DllImport(LIBSYSTEM)]
+    public static extern int mach_vm_region(IntPtr task,
+        ref ulong address,
+        out ulong size,
+        int flavor,
+        IntPtr info,
+        ref uint count,
+        out ulong object_name
+    );
 
     static byte[] ReadProcessMemory(int pid, ulong address, ulong length) {
         IntPtr task;
@@ -58,7 +84,7 @@ public class MacGrabber {
         ulong size;
         result = mach_vm_read(task, address, length, out bufferPtr, out size);
         if (result != KERN_SUCCESS) {
-            Console.WriteLine($"mach_vm_read failed with code {result}");
+            //Console.WriteLine($"mach_vm_read failed with code {result}");
             return new byte[0];
         }
 
@@ -70,13 +96,74 @@ public class MacGrabber {
 
         return buffer;
     }
+    
+    public static ulong FindCemuBase(int pid, ulong minSize) {
+        IntPtr task;
+        IntPtr localTask = mach_task_self();
+        byte?[] patternBytes = new byte?[] { 0x02, 0xD4, 0xE7 };
+
+        int result = task_for_pid(localTask, pid, out task);
+        if (result != KERN_SUCCESS) {
+            Console.WriteLine($"task_for_pid failed: {result}");
+            return 0;
+        }
+
+        ulong address = 0;
+        while (true) {
+            ulong size;
+            uint count = VM_REGION_BASIC_INFO_COUNT_64;
+            IntPtr infoPtr = Marshal.AllocHGlobal(Marshal.SizeOf<vm_region_basic_info_64>());
+            ulong objectName;
+
+            result = mach_vm_region(task,
+                ref address,
+                out size,
+                VM_REGION_BASIC_INFO_64,
+                infoPtr,
+                ref count,
+                out objectName
+            );
+
+            if (result != KERN_SUCCESS) {
+                Marshal.FreeHGlobal(infoPtr);
+                break;
+            }
+
+            var regionInfo = Marshal.PtrToStructure<vm_region_basic_info_64>(infoPtr);
+            Marshal.FreeHGlobal(infoPtr);
+
+            bool readable = (regionInfo.protection & VM_PROT_READ) != 0;
+
+            if (readable && size < minSize) {
+                var bytes = ReadProcessMemory(pid, (ulong)(address + 0xE000000), 20);
+
+                if (bytes != null && bytes.Length > 0) {
+                    int patternLen = patternBytes.Length;
+                    for (int i = 0, j = 0; i + patternLen <= 20; i++) {
+                        if (patternBytes[j] == null || bytes[i] == patternBytes[j]) {
+                            j++;
+                        } else {
+                            j = 0;
+                        }
+
+                        if (j >= patternLen) {
+                            return address;
+                        }
+                    }
+                }
+            }
+
+            address += size;
+        }
+        return 0;
+    }
 
     static byte[] readBytes(uint address, uint length) {
-        return ReadProcessMemory(pid, cbase + address, length);
+        return ReadProcessMemory(pid, (ulong)(cbase + 0xE000000) + address - 0x10000000, length);
     }
 
     static uint readUInt32(uint address) {
-        return BitConverter.ToUInt32(ReadProcessMemory(pid, cbase + address, 4).Reverse().ToArray(), 0);
+        return BitConverter.ToUInt32(ReadProcessMemory(pid, (ulong)(cbase + 0xE000000) + address - 0x10000000, 4).Reverse().ToArray(), 0);
     }
 
     static async Task<string> GetPNID(int pid) {
@@ -118,43 +205,15 @@ public class MacGrabber {
         }
         pid = targetProcess.Id;
 
-        // This is kind of janky but idk how else to reliably do it
-        var startInfo = new ProcessStartInfo {
-            FileName = "ps",
-            Arguments = $"-o user= -p {pid}",
-            RedirectStandardOutput = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        var ps = Process.Start(startInfo);
-        string username = ps.StandardOutput.ReadToEnd().Trim();
-        ps.WaitForExit();
-
-        // Find Cemu's base address
-        string cemu_log = $"/Users/{username}/Library/Application Support/Cemu/log.txt";
-        string pattern = @"base:\s*(0x[0-9A-Fa-f]+)";
-        string patternMatch = null;
-
-        if (!File.Exists(cemu_log)) {
-            Console.WriteLine("Could not find cemu log.txt in: " + cemu_log);
+        cbase = FindCemuBase(pid, 1308622848);
+        if (cbase == 0) {
+            Console.WriteLine("Could not find Cemu base...");
             return;
         }
-        foreach (string line in File.ReadLines(cemu_log)) {
-            Match match = Regex.Match(line, pattern);
-            if (match.Success) {
-                patternMatch = match.Groups[1].Value;
-                break;
-            }
-        }
-        if (patternMatch == null) {
-            Console.WriteLine("Could not find cemu base address.");
-            return;
-        }
-        cbase = Convert.ToUInt64(patternMatch, 16);
 
         Console.WriteLine("MacGrabber by CrafterPika.");
         Console.WriteLine("Special Thanks: Javi, Tombuntu and Winterberry.\n");
-        Console.WriteLine($"Found Cemu base: {patternMatch}");
+        Console.WriteLine($"Found Cemu base: 0x{cbase:X}");
         // Alr now it's getting intresting
         Console.WriteLine("Player X: PID (Hex)| PID (Dec)  | PNID             | Name");
         Console.WriteLine("---------------------------------------------------------");
